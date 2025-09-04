@@ -1,0 +1,129 @@
+#!/usr/bin/env bash
+# subdomain_word_finder
+# developed by 0xvar
+# version 1.1
+
+set -euo pipefail
+
+PROGNAME="subdomain-word-finder"
+VERSION="1.1"
+AUTHOR="0xvar"
+
+CONFIG_FILE="$HOME/.subdomain_word_finder.conf"
+
+# Load config if exists
+if [[ -f "$CONFIG_FILE" ]]; then
+  source "$CONFIG_FILE"
+fi
+
+SHODAN_KEY="${SHODAN_KEY:-}"
+VIRUSTOTAL_KEY="${VIRUSTOTAL_KEY:-}"
+CENSYS_UID="${CENSYS_UID:-}"
+CENSYS_SECRET="${CENSYS_SECRET:-}"
+
+banner() {
+cat << "EOF"
+   _____       _           _                 
+  / ____|     | |         | |                
+ | (___   ___ | |__   ___ | |__   ___  _ __  
+  \___ \ / _ \| '_ \ / _ \| '_ \ / _ \| '_ \ 
+  ____) | (_) | | | | (_) | |_) | (_) | | | |
+ |_____/ \___/|_| |_|\___/|_.__/ \___/|_| |_|
+                                             
+EOF
+echo "$PROGNAME - developed by $AUTHOR"
+echo "               version $VERSION"
+echo
+}
+
+usage() {
+  echo "Usage: $PROGNAME -d <domain> -k <keyword> [-o output.txt] [--shodan-key KEY] [--virustotal-key KEY] [--censys-uid UID --censys-secret SECRET]"
+  echo
+  echo "Options:"
+  echo "  -d    Root domain (example.com)"
+  echo "  -k    Keyword to match right after * (e.g., api)"
+  echo "  -o    Output file (default: matches.txt)"
+  echo "  --shodan-key      Shodan API key"
+  echo "  --virustotal-key  VirusTotal API key"
+  echo "  --censys-uid      Censys UID"
+  echo "  --censys-secret   Censys Secret"
+  echo "  -h    Show help"
+  echo
+  echo "Example:"
+  echo "  $PROGNAME -d gojekapi.com -k api --shodan-key XXXXXX -o api_matches.txt"
+}
+
+DOMAIN=""
+KEYWORD=""
+OUTPUT="matches.txt"
+
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    -d) DOMAIN="$2"; shift 2;;
+    -k) KEYWORD="$2"; shift 2;;
+    -o) OUTPUT="$2"; shift 2;;
+    --shodan-key) SHODAN_KEY="$2"; shift 2;;
+    --virustotal-key) VIRUSTOTAL_KEY="$2"; shift 2;;
+    --censys-uid) CENSYS_UID="$2"; shift 2;;
+    --censys-secret) CENSYS_SECRET="$2"; shift 2;;
+    -h|--help) banner; usage; exit 0;;
+    *) echo "Unknown option: $1"; usage; exit 1;;
+  esac
+done
+
+if [[ -z "$DOMAIN" || -z "$KEYWORD" ]]; then
+  banner
+  usage
+  exit 1
+fi
+
+banner
+echo "[*] Collecting subdomains for $DOMAIN ..."
+RESULTS=$(mktemp)
+
+# ========== Passive Sources ==========
+if command -v subfinder >/dev/null 2>&1; then
+  subfinder -silent -d "$DOMAIN" >> "$RESULTS"
+fi
+
+if command -v assetfinder >/dev/null 2>&1; then
+  assetfinder --subs-only "$DOMAIN" >> "$RESULTS"
+fi
+
+# fallback: crt.sh
+curl -s "https://crt.sh/?q=%25.$DOMAIN&output=json" \
+| jq -r '.[].name_value' 2>/dev/null \
+| sed 's/\*\.//g' >> "$RESULTS"
+
+# ========== Shodan ==========
+if [[ -n "$SHODAN_KEY" ]]; then
+  echo "[*] Querying Shodan..."
+  curl -s "https://api.shodan.io/dns/domain/$DOMAIN?key=$SHODAN_KEY" \
+  | jq -r '.subdomains[]?' 2>/dev/null \
+  | sed "s/$/.$DOMAIN/" >> "$RESULTS" || true
+fi
+
+# ========== VirusTotal ==========
+if [[ -n "$VIRUSTOTAL_KEY" ]]; then
+  echo "[*] Querying VirusTotal..."
+  curl -s --header "x-apikey: $VIRUSTOTAL_KEY" \
+    "https://www.virustotal.com/api/v3/domains/$DOMAIN/subdomains?limit=1000" \
+  | jq -r '.data[].id' 2>/dev/null >> "$RESULTS" || true
+fi
+
+# ========== Censys ==========
+if [[ -n "$CENSYS_UID" && -n "$CENSYS_SECRET" ]]; then
+  echo "[*] Querying Censys..."
+  curl -s -u "$CENSYS_UID:$CENSYS_SECRET" \
+    "https://search.censys.io/api/v2/hosts/search?q=$DOMAIN" \
+  | jq -r '.result.hits[].name' 2>/dev/null >> "$RESULTS" || true
+fi
+
+# ====================================
+sort -u "$RESULTS" -o "$RESULTS"
+
+echo "[*] Filtering with keyword '$KEYWORD' at beginning of subdomain ..."
+grep -Ei "^${KEYWORD}\." "$RESULTS" | tee "$OUTPUT"
+
+echo
+echo "[*] Done. Matches saved to $OUTPUT"
