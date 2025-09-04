@@ -1,14 +1,16 @@
-# subdomain_words_finder
-subdomain-word-finder is a Bash-based reconnaissance tool that helps security researchers and bug bounty hunters discover subdomains matching specific keywords after a wildcard domain.
+# subdomain-word-finder
 
-The tool supports:
+**subdomain-word-finder** — developed by 0xvar  
+Version 1.1
 
-Passive enumeration using subfinder, assetfinder, and crt.sh.
+Tool for finding subdomains that match specific keywords after a wildcard domain.  
+Supports passive sources (subfinder, assetfinder, crt.sh) and API integrations (Shodan, VirusTotal, Censys).
 
-API integrations with Shodan, VirusTotal, and Censys (via config.conf).
+---
 
-Keyword filtering to detect subdomains that start or contain user-defined terms (e.g., api.example.com, store.example.com).
+## 📥 Installation
 
-Flexible configuration: If API keys are provided in config.conf, they are used automatically; otherwise, the tool falls back to free passive sources.
-
-This project aims to simplify subdomain discovery workflows and make it easier to focus on interesting targets like APIs, stores, or other keyword-specific assets
+```bash
+git clone https://github.com/0xvar/subdomain-word-finder.git
+cd subdomain-word-finder
+chmod +x subdomain_word_finder
